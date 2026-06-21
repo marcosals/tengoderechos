@@ -25,6 +25,7 @@ export default function CitationCard({ citation }: CitationCardProps) {
   return (
     <CardView style={styles.card}>
       <TouchableOpacity 
+        testID="citation-card-toggle"
         style={styles.header} 
         onPress={() => setExpanded(!expanded)}
         activeOpacity={0.7}
