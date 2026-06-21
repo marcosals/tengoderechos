@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   StyleSheet, 
   TouchableOpacity, 
@@ -11,8 +11,10 @@ import {
 import { SymbolView } from 'expo-symbols';
 import * as ImagePicker from 'expo-image-picker';
 import { useCameraPermissions } from 'expo-camera';
+import { router } from 'expo-router';
 
 import { Text, View, CardView, TextInput, useThemeColor } from '@/components/Themed';
+import { AuthStore } from '@/components/AuthStore';
 
 const { width } = Dimensions.get('window');
 
@@ -25,7 +27,7 @@ interface AnalysisReport {
 }
 
 export default function MultimediaScreen() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [session, setSession] = useState(AuthStore.getSession());
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [contextText, setContextText] = useState('');
   
@@ -48,6 +50,16 @@ export default function MultimediaScreen() {
     'Enviando imagen a análisis de inteligencia artificial...',
     'Contrastando con Códigos Civiles y Penales...'
   ];
+
+  // Subscribe to AuthStore changes
+  useEffect(() => {
+    const unsubscribe = AuthStore.subscribe((newSession) => {
+      setSession(newSession);
+    });
+    return unsubscribe;
+  }, []);
+
+  const isLoggedIn = !!session;
 
   // Request Camera Permission
   const verifyCameraPermission = async () => {
@@ -88,7 +100,6 @@ export default function MultimediaScreen() {
       }
     } catch (error) {
       console.error('Camera launch error:', error);
-      // Fallback for simulators where camera is not available
       Alert.alert('Simulador Detectado', 'La cámara no está disponible en este dispositivo. Cargaremos una imagen de demostración.', [
         {
           text: 'Ok',
@@ -176,6 +187,11 @@ export default function MultimediaScreen() {
     setReport(null);
   };
 
+  const handleLogout = () => {
+    AuthStore.setSession(null);
+    handleClear();
+  };
+
   // Screen 1: Guest Mode view (Login Required)
   if (!isLoggedIn) {
     return (
@@ -186,7 +202,7 @@ export default function MultimediaScreen() {
           </View>
           <Text style={styles.authPromptTitle}>Inicio de Sesión Requerido</Text>
           <Text style={styles.authPromptSubtitle}>
-            Por razones de seguridad y cumplimiento de la Ley de Protección de Datos Personales, la carga y análisis de archivos multimedia requiere que los usuarios estén autenticados.
+            Para subir fotos y videos con evidencias de posibles infracciones civiles o viales (por ejemplo, abuso de autoridad o accidentes) y obtener análisis de legalidad respaldados por IA, es necesario iniciar sesión.
           </Text>
           
           <CardView style={styles.benefitsCard} lightColor="#F8FAFC" darkColor="#111827">
@@ -198,10 +214,10 @@ export default function MultimediaScreen() {
 
           <TouchableOpacity 
             style={[styles.loginButton, { backgroundColor: primaryColor }]} 
-            onPress={() => setIsLoggedIn(true)}
+            onPress={() => router.push('/auth')}
             activeOpacity={0.8}
           >
-            <Text style={styles.loginButtonText}>Iniciar Sesión (Demo)</Text>
+            <Text style={styles.loginButtonText}>Registrarse / Iniciar Sesión</Text>
           </TouchableOpacity>
         </CardView>
       </ScrollView>
@@ -211,11 +227,9 @@ export default function MultimediaScreen() {
   // Screen 2: Interactive Upload Interface
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      {isLoggedIn && (
-        <TouchableOpacity style={styles.logoutButton} onPress={() => setIsLoggedIn(false)}>
-          <Text style={styles.logoutText}>Cerrar Sesión (Demo)</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <Text style={styles.logoutText}>Cerrar Sesión</Text>
+      </TouchableOpacity>
 
       <Text style={styles.screenHeading}>Pregunta con Evidencia</Text>
       <Text style={styles.screenSubheading}>

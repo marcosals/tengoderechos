@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SymbolView } from 'expo-symbols';
+import { router } from 'expo-router';
 
 import { Text, View, CardView, useThemeColor } from '@/components/Themed';
 import { LocationStore } from '@/components/LocationStore';
+import { AuthStore } from '@/components/AuthStore';
 
 const MEXICAN_STATES = [
   'CDMX',
@@ -17,11 +19,13 @@ const MEXICAN_STATES = [
 
 export default function SettingsScreen() {
   const [currentState, setCurrentState] = useState(LocationStore.getState());
+  const [session, setSession] = useState(AuthStore.getSession());
   
   const primaryColor = useThemeColor({}, 'primary');
   const accentColor = useThemeColor({}, 'accent');
   const textMutedColor = useThemeColor({}, 'textMuted');
 
+  // Subscribe to LocationStore updates
   useEffect(() => {
     const unsubscribe = LocationStore.subscribe((newState) => {
       setCurrentState(newState);
@@ -29,8 +33,50 @@ export default function SettingsScreen() {
     return unsubscribe;
   }, []);
 
+  // Subscribe to AuthStore updates
+  useEffect(() => {
+    const unsubscribe = AuthStore.subscribe((newSession) => {
+      setSession(newSession);
+    });
+    return unsubscribe;
+  }, []);
+
   const selectState = (stateName: string) => {
     LocationStore.setState(stateName);
+  };
+
+  const handleAuthPress = () => {
+    if (session) {
+      // Logout
+      AuthStore.setSession(null);
+    } else {
+      // Go to Login Screen
+      router.push('/auth');
+    }
+  };
+
+  // Helper to extract display name safely from either real or mock session
+  const getUserName = () => {
+    if (!session || !session.user) return 'Modo Invitado';
+    
+    // Check real Supabase user_metadata
+    const userMetadata = (session.user as any).user_metadata;
+    if (userMetadata && userMetadata.display_name) {
+      return userMetadata.display_name;
+    }
+
+    // Check mock display name
+    if ('display_name' in session.user) {
+      return (session.user as any).display_name;
+    }
+
+    return session.user.email || 'Usuario';
+  };
+
+  // Helper to extract email safely
+  const getUserEmail = () => {
+    if (!session || !session.user) return 'Las búsquedas son anónimas y locales.';
+    return session.user.email || '';
   };
 
   return (
@@ -72,29 +118,41 @@ export default function SettingsScreen() {
         })}
       </CardView>
 
-      {/* 2. Login Account Sandbox */}
+      {/* 2. Profile / Account Settings */}
       <Text style={styles.sectionTitle}>Perfil y Sincronización</Text>
       <CardView style={styles.card}>
         <View style={styles.authHeader}>
           <View style={styles.avatarPlaceholder} lightColor="#E2E8F0" darkColor="#334155">
-            <SymbolView name="person.fill" size={24} tintColor={primaryColor} />
+            <SymbolView 
+              name={session ? "person.crop.circle.fill" : "person.fill"} 
+              size={24} 
+              tintColor={primaryColor} 
+            />
           </View>
           <View style={styles.authHeaderInfo}>
-            <Text style={styles.authTitle}>Modo Invitado</Text>
-            <Text style={styles.authSubtitle}>Las búsquedas son anónimas y locales.</Text>
+            <Text style={styles.authTitle}>{getUserName()}</Text>
+            <Text style={styles.authSubtitle}>{getUserEmail()}</Text>
           </View>
         </View>
         
         <Text style={styles.authDescription}>
-          Crea una cuenta para guardar tus consultas, sincronizar tu historial legal y habilitar la cámara para realizar análisis multimedia ("¿Es esto legal?").
+          {session
+            ? 'Has iniciado sesión correctamente. Tu historial legal y cargas de evidencias están sincronizados y resguardados en tu bóveda privada.'
+            : 'Crea una cuenta para guardar tus consultas, sincronizar tu historial legal y habilitar la cámara para realizar análisis multimedia ("¿Es esto legal?").'
+          }
         </Text>
 
         <TouchableOpacity 
-          style={[styles.authButton, { backgroundColor: primaryColor }]}
-          onPress={() => alert('Próximamente: El módulo de autenticación con Supabase Auth se habilitará en la siguiente fase.')}
+          style={[
+            styles.authButton, 
+            { backgroundColor: session ? '#EF4444' : primaryColor }
+          ]}
+          onPress={handleAuthPress}
           activeOpacity={0.8}
         >
-          <Text style={styles.authButtonText}>Registrarse / Iniciar Sesión</Text>
+          <Text style={styles.authButtonText}>
+            {session ? 'Cerrar Sesión' : 'Registrarse / Iniciar Sesión'}
+          </Text>
         </TouchableOpacity>
       </CardView>
 

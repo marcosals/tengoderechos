@@ -5,6 +5,8 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
+import { supabase } from '@/utils/supabase';
+import { AuthStore } from '@/components/AuthStore';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -45,10 +47,31 @@ export default function RootLayout() {
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
 
+  // Listen to Supabase Auth session updates on mount
+  useEffect(() => {
+    if (!supabase) return;
+
+    // Fetch active session on launch
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      AuthStore.setSession(session);
+    });
+
+    // Listen for Auth changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      AuthStore.setSession(session);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="results" options={{ headerShown: false }} />
+        <Stack.Screen name="auth" options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
       </Stack>
     </ThemeProvider>
