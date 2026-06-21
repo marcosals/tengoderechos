@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const isTestRun = process.env.NODE_ENV === 'test' || process.argv.some(arg => arg.includes('test') || arg.includes('--test'));
 
@@ -27,30 +27,31 @@ const supabase = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   : null;
 
-// Helper function to call OpenAI Embeddings API
+// Helper function to call Gemini Embeddings API
 async function getEmbedding(text) {
-  if (!OPENAI_API_KEY) {
-    console.warn('⚠️ Warning: OPENAI_API_KEY is not defined. Generating mock 1536-dim vector for testing.');
-    return Array(1536).fill(0).map(() => Math.random() - 0.5);
+  if (!GEMINI_API_KEY || GEMINI_API_KEY.includes('placeholder')) {
+    console.warn('⚠️ Warning: GEMINI_API_KEY is not defined or is a placeholder. Generating mock 768-dim vector for testing.');
+    return Array(768).fill(0).map(() => Math.random() - 0.5);
   }
 
   try {
     const response = await axios.post(
-      'https://api.openai.com/v1/embeddings',
+      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GEMINI_API_KEY}`,
       {
-        input: text,
-        model: 'text-embedding-3-small'
+        model: 'models/text-embedding-004',
+        content: {
+          parts: [{ text: text }]
+        }
       },
       {
         headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json'
         }
       }
     );
-    return response.data.data[0].embedding;
+    return response.data.embedding.values;
   } catch (error) {
-    console.error('❌ OpenAI Embedding API error:', error.response?.data || error.message);
+    console.error('❌ Gemini Embedding API error:', error.response?.data || error.message);
     throw error;
   }
 }

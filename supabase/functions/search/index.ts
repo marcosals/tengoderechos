@@ -17,11 +17,11 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const openaiKey = Deno.env.get("OPENAI_API_KEY");
+    const geminiKey = Deno.env.get("GEMINI_API_KEY");
 
-    if (!openaiKey) {
+    if (!geminiKey) {
       return new Response(
-        JSON.stringify({ error: "OPENAI_API_KEY environment variable is missing on backend." }),
+        JSON.stringify({ error: "GEMINI_API_KEY environment variable is missing on backend." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -45,26 +45,27 @@ serve(async (req) => {
       searchJurisdictions.push("CDMX");
     }
 
-    // 2. Generate vector embedding for the search query using OpenAI text-embedding-3-small
-    const embeddingResponse = await fetch("https://api.openai.com/v1/embeddings", {
+    // 2. Generate vector embedding for the search query using Gemini text-embedding-004
+    const embeddingResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        input: query.trim(),
-        model: "text-embedding-3-small",
+        model: "models/text-embedding-004",
+        content: {
+          parts: [{ text: query.trim() }]
+        }
       }),
     });
 
     if (!embeddingResponse.ok) {
       const errText = await embeddingResponse.text();
-      throw new Error(`OpenAI Embedding API failed: ${errText}`);
+      throw new Error(`Gemini Embedding API failed: ${errText}`);
     }
 
     const embeddingData = await embeddingResponse.json();
-    const queryEmbedding = embeddingData.data[0].embedding;
+    const queryEmbedding = embeddingData.embedding.values;
 
     // 3. Query Supabase database for vector matching using the match_legal_documents RPC
     // Use the client's request headers or fallback to anon key
@@ -111,30 +112,34 @@ Contexto legal (Artículos oficiales de la base de datos):
 ${contextText}
 `;
 
-    // 5. Generate plain language explanation using OpenAI GPT-4o-mini
-    const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    // 5. Generate plain language explanation using Gemini 1.5 Flash
+    const chatResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: `${systemPrompt}\n\n${userPrompt}` }
+            ]
+          }
         ],
-        temperature: 0.2, // Low temperature for high factual accuracy
+        generationConfig: {
+          temperature: 0.2
+        }
       }),
     });
 
     if (!chatResponse.ok) {
       const errText = await chatResponse.text();
-      throw new Error(`OpenAI Chat API failed: ${errText}`);
+      throw new Error(`Gemini Chat API failed: ${errText}`);
     }
 
     const chatData = await chatResponse.json();
-    const answer = chatData.choices[0].message.content;
+    const answer = chatData.candidates[0].content.parts[0].text;
 
     // 6. Return response to mobile client
     const output = {
