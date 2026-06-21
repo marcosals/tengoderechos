@@ -49,6 +49,23 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="multimedia"
+        options={{
+          title: 'Evidencia',
+          tabBarIcon: ({ color }) => (
+            <SymbolView
+              name={{
+                ios: 'camera.fill',
+                android: 'photo_camera',
+                web: 'photo_camera',
+              }}
+              tintColor={color}
+              size={24}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="two"
         options={{
           title: 'Configuración',
