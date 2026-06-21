@@ -15,13 +15,17 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+const isTestRun = process.env.NODE_ENV === 'test' || process.argv.some(arg => arg.includes('test') || arg.includes('--test'));
+
+if (!isTestRun && (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY)) {
   console.error('❌ Error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required.');
   process.exit(1);
 }
 
 // Initialize Supabase Client with service role key to bypass RLS policies
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const supabase = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+  : null;
 
 // Helper function to call OpenAI Embeddings API
 async function getEmbedding(text) {
@@ -111,6 +115,55 @@ async function ingestFile(filePath, jurisdiction, codeName) {
   }
 }
 
+// Helper function to extract metadata from filename
+export function getMetadataFromFilename(filename) {
+  const name = filename.replace('.txt', '').toLowerCase();
+  
+  if (name === 'constitucion_federal') {
+    return {
+      jurisdiction: 'Federal',
+      codeName: 'Constitución Política de los Estados Unidos Mexicanos'
+    };
+  }
+  if (name === 'codigo_civil_federal') {
+    return {
+      jurisdiction: 'Federal',
+      codeName: 'Código Civil Federal'
+    };
+  }
+  if (name === 'ley_federal_trabajo') {
+    return {
+      jurisdiction: 'Federal',
+      codeName: 'Ley Federal del Trabajo'
+    };
+  }
+  if (name === 'transito_cdmx') {
+    return {
+      jurisdiction: 'CDMX',
+      codeName: 'Reglamento de Tránsito de la CDMX'
+    };
+  }
+  
+  // Generic Fallback
+  let jurisdiction = 'CDMX';
+  let codeName = filename.replace('.txt', '').replace(/_/g, ' ');
+  
+  if (filename.includes('_')) {
+    const parts = filename.replace('.txt', '').split('_');
+    const lastPart = parts[parts.length - 1].toUpperCase();
+    if (['CDMX', 'FEDERAL', 'JALISCO', 'NUEVO_LEON', 'EDOMEX'].includes(lastPart)) {
+      jurisdiction = lastPart === 'FEDERAL' ? 'Federal' : lastPart;
+      codeName = parts.slice(0, parts.length - 1).join(' ');
+    } else {
+      codeName = parts.join(' ');
+    }
+  }
+  
+  // Capitalize words
+  codeName = codeName.replace(/\b\w/g, c => c.toUpperCase());
+  return { jurisdiction, codeName };
+}
+
 // Automatically load files in the sources directory
 async function run() {
   const sourcesDir = path.join(__dirname, 'sources');
@@ -130,26 +183,13 @@ async function run() {
 
   for (const file of textFiles) {
     const filePath = path.join(sourcesDir, file);
-    
-    // Parse metadata from file name: e.g. "transito_cdmx.txt" -> CDMX, Reglamento de Tránsito
-    let jurisdiction = 'CDMX';
-    let codeName = 'Reglamento de Tránsito de la CDMX';
-
-    if (file.includes('federal')) {
-      jurisdiction = 'Federal';
-      codeName = file.replace('_federal.txt', '').replace(/_/g, ' ');
-    } else if (file.includes('_')) {
-      const parts = file.replace('.txt', '').split('_');
-      jurisdiction = parts[parts.length - 1].toUpperCase();
-      codeName = parts.slice(0, parts.length - 1).join(' ');
-      // Capitalize first letters of codeName
-      codeName = codeName.replace(/\b\w/g, c => c.toUpperCase());
-    }
-
+    const { jurisdiction, codeName } = getMetadataFromFilename(file);
     await ingestFile(filePath, jurisdiction, codeName);
   }
 
   console.log('\n🎉 Legal Data Ingestion process completed.');
 }
 
-run();
+if (process.argv[1] && (process.argv[1].endsWith('index.js') || process.argv[1].endsWith('parser/index.js'))) {
+  run();
+}
