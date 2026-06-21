@@ -45,17 +45,18 @@ serve(async (req) => {
       searchJurisdictions.push("CDMX");
     }
 
-    // 2. Generate vector embedding for the search query using Gemini text-embedding-004
-    const embeddingResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`, {
+    // 2. Generate vector embedding for the search query using Gemini gemini-embedding-2
+    const embeddingResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=${geminiKey}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "models/text-embedding-004",
+        model: "models/gemini-embedding-2",
         content: {
           parts: [{ text: query.trim() }]
-        }
+        },
+        outputDimensionality: 768
       }),
     });
 
@@ -112,8 +113,8 @@ Contexto legal (Artículos oficiales de la base de datos):
 ${contextText}
 `;
 
-    // 5. Generate plain language explanation using Gemini 1.5 Flash
-    const chatResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
+    // 5. Generate plain language explanation using Gemini 2.5 Flash
+    const chatResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
