@@ -174,6 +174,19 @@ async function run() {
     process.exit(1);
   }
 
+  // 0. Clean the table first to prevent duplicates on re-run
+  console.log('🧹 Clearing legal_documents table...');
+  const { error: deleteError } = await supabase
+    .from('legal_documents')
+    .delete()
+    .gt('id', 0); // deletes all rows
+
+  if (deleteError) {
+    console.error('❌ Failed to clear table:', deleteError.message);
+  } else {
+    console.log('✅ Table cleared.');
+  }
+
   const files = fs.readdirSync(sourcesDir);
   const textFiles = files.filter(f => f.endsWith('.txt'));
 
