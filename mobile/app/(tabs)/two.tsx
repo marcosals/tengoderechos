@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { router } from 'expo-router';
+import { supabase } from '@/utils/supabase';
 
 import { Text, View, CardView, useThemeColor } from '@/components/Themed';
 import { LocationStore } from '@/components/LocationStore';
@@ -52,6 +53,61 @@ export default function SettingsScreen() {
     } else {
       // Go to Login Screen
       router.push('/auth');
+    }
+  };
+
+  const handleDeleteAccountPress = () => {
+    Alert.alert(
+      '¿Eliminar tu cuenta?',
+      'Esta acción es completamente irreversible. Se borrarán todas tus consultas de derechos guardadas y reportes de evidencia permanentemente.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Continuar', 
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Confirmar Eliminación',
+              '¿Estás absolutamente seguro de que deseas eliminar tu cuenta de Tengo Derechos? No se podrán recuperar tus datos.',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                { 
+                  text: 'Eliminar Cuenta', 
+                  style: 'destructive',
+                  onPress: executeAccountDeletion
+                }
+              ]
+            );
+          }
+        }
+      ]
+    );
+  };
+
+  const executeAccountDeletion = async () => {
+    if (!session || !session.user) return;
+    
+    if (!supabase || session.user.id.startsWith('mock-')) {
+      AuthStore.setSession(null);
+      Alert.alert('Cuenta Eliminada (Modo Demo)', 'Tu sesión demostrativa ha sido eliminada y tus datos locales se han borrado.');
+      router.replace('/');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', session.user.id);
+
+      if (error) throw error;
+
+      AuthStore.setSession(null);
+      Alert.alert('Cuenta Eliminada', 'Tu cuenta y todos tus datos personales han sido completamente eliminados del sistema.');
+      router.replace('/');
+    } catch (err: any) {
+      console.error('❌ Failed to delete account:', err);
+      Alert.alert('Error', 'No pudimos procesar la eliminación de tu cuenta en este momento. Inténtalo de nuevo.');
     }
   };
 
@@ -154,6 +210,16 @@ export default function SettingsScreen() {
             {session ? 'Cerrar Sesión' : 'Registrarse / Iniciar Sesión'}
           </Text>
         </TouchableOpacity>
+
+        {session && (
+          <TouchableOpacity 
+            style={styles.deleteAccountButton}
+            onPress={handleDeleteAccountPress}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.deleteAccountButtonText}>Eliminar Cuenta de forma permanente</Text>
+          </TouchableOpacity>
+        )}
       </CardView>
 
       {/* 3. Legal Warning Disclaimer */}
@@ -265,6 +331,22 @@ const styles = StyleSheet.create({
   authButtonText: {
     color: '#FFF',
     fontSize: 14,
+    fontWeight: '700',
+  },
+  deleteAccountButton: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  deleteAccountButtonText: {
+    color: '#EF4444',
+    fontSize: 13,
     fontWeight: '700',
   },
   disclaimerCard: {
