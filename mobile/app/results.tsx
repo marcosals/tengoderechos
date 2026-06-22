@@ -91,6 +91,8 @@ export default function SearchResultsScreen() {
   const [saved, setSaved] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [session, setSession] = useState(AuthStore.getSession());
+  const [queryId, setQueryId] = useState<string | null>(null);
+  const [userVote, setUserVote] = useState<number | null>(null);
 
   const primaryColor = useThemeColor({}, 'primary');
   const accentColor = useThemeColor({}, 'accent');
@@ -151,6 +153,12 @@ export default function SearchResultsScreen() {
               }));
 
             setCitations(fetchedCitations);
+            
+            const activeSession = AuthStore.getSession();
+            if (activeSession?.user?.id) {
+              await loadVoteStatus(activeSession.user.id);
+            }
+
             setLoading(false);
             return;
           }
@@ -196,6 +204,7 @@ export default function SearchResultsScreen() {
         const activeSession = AuthStore.getSession();
         if (activeSession?.user?.id) {
           await checkSavedStatus(activeSession.user.id);
+          await loadVoteStatus(activeSession.user.id);
         }
       } catch (err) {
         console.error('❌ Edge Function search failed. Falling back to local mock data:', err);
@@ -231,6 +240,90 @@ export default function SearchResultsScreen() {
       }
     } catch (err) {
       console.error('Error checking saved status:', err);
+    }
+  };
+
+  const loadVoteStatus = async (currentUserId: string) => {
+    if (!supabase || !query) return;
+    try {
+      const { data: queryData } = await supabase
+        .from('popular_queries')
+        .select('id')
+        .eq('query_text', query.trim())
+        .maybeSingle();
+
+      if (queryData) {
+        setQueryId(queryData.id);
+        const { data: voteData } = await supabase
+          .from('query_votes')
+          .select('vote_type')
+          .eq('query_id', queryData.id)
+          .eq('user_id', currentUserId)
+          .maybeSingle();
+
+        if (voteData) {
+          setUserVote(voteData.vote_type);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading vote status:', err);
+    }
+  };
+
+  const handleVote = async (voteType: number) => {
+    if (!session || !session.user) {
+      Alert.alert(
+        'Iniciar Sesión',
+        'Necesitas una cuenta para votar por las respuestas más útiles.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Iniciar Sesión', onPress: () => router.push('/auth') }
+        ]
+      );
+      return;
+    }
+
+    if (!supabase || !queryId) {
+      // Mock mode vote toggle
+      setUserVote(userVote === voteType ? null : voteType);
+      return;
+    }
+
+    try {
+      if (userVote === voteType) {
+        // Clear vote
+        const { error } = await supabase
+          .from('query_votes')
+          .delete()
+          .eq('query_id', queryId)
+          .eq('user_id', session.user.id);
+        if (error) throw error;
+
+        // Fetch remaining votes and update votes_count
+        const { data: countData } = await supabase
+          .from('query_votes')
+          .select('vote_type')
+          .eq('query_id', queryId);
+        const newNetVotes = (countData || []).reduce((sum, v) => sum + v.vote_type, 0);
+
+        await supabase
+          .from('popular_queries')
+          .update({ votes_count: newNetVotes })
+          .eq('id', queryId);
+
+        setUserVote(null);
+      } else {
+        // Upsert vote
+        const { error } = await supabase.rpc('vote_query', {
+          p_query_id: queryId,
+          p_vote_type: voteType
+        });
+        if (error) throw error;
+        setUserVote(voteType);
+      }
+    } catch (err: any) {
+      console.error('❌ Failed to submit vote:', err);
+      Alert.alert('Error', 'No pudimos procesar tu voto.');
     }
   };
 
@@ -380,6 +473,37 @@ export default function SearchResultsScreen() {
             </View>
           </CardView>
 
+          {queryId && (
+            <View style={styles.voteSection} lightColor="#F8FAFC" darkColor="#1E293B">
+              <Text style={styles.votePrompt}>¿Te sirvió esta respuesta?</Text>
+              <View style={styles.voteButtonsContainer}>
+                <TouchableOpacity 
+                  style={[
+                    styles.voteBtn, 
+                    userVote === 1 && { backgroundColor: '#D1FAE5', borderColor: '#10B981' }
+                  ]}
+                  onPress={() => handleVote(1)}
+                  activeOpacity={0.8}
+                >
+                  <SymbolView name="hand.thumbsup.fill" size={14} tintColor={userVote === 1 ? '#10B981' : textMutedColor} />
+                  <Text style={[styles.voteBtnText, userVote === 1 && { color: '#10B981' }]}>Sí</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[
+                    styles.voteBtn, 
+                    userVote === -1 && { backgroundColor: '#FEE2E2', borderColor: '#EF4444' }
+                  ]}
+                  onPress={() => handleVote(-1)}
+                  activeOpacity={0.8}
+                >
+                  <SymbolView name="hand.thumbsdown.fill" size={14} tintColor={userVote === -1 ? '#EF4444' : textMutedColor} />
+                  <Text style={[styles.voteBtnText, userVote === -1 && { color: '#EF4444' }]}>No</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {/* Legal Citations List */}
           <Text style={styles.sectionHeading}>Fundamentos de Ley ({citations.length})</Text>
           {citations.length === 0 ? (
@@ -465,6 +589,42 @@ const styles = StyleSheet.create({
   resultsContainer: {
     padding: 20,
     backgroundColor: 'transparent',
+  },
+  voteSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  votePrompt: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  voteButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  voteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginLeft: 10,
+    backgroundColor: 'transparent',
+  },
+  voteBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 6,
+    color: '#64748B',
   },
   sectionHeading: {
     fontSize: 15,

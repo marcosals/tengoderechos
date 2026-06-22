@@ -111,7 +111,7 @@ export default function SearchHomeScreen() {
         const { data, error } = await supabase
           .from('popular_queries')
           .select('id, query_text, category')
-          .order('search_count', { ascending: false })
+          .order('votes_count', { ascending: false })
           .limit(4);
 
         if (error || !data || data.length === 0) {
