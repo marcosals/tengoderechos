@@ -5,7 +5,8 @@ import {
   ActivityIndicator, 
   TouchableOpacity, 
   Share, 
-  Clipboard 
+  Clipboard,
+  Alert
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
@@ -13,6 +14,7 @@ import { SymbolView } from 'expo-symbols';
 import { Text, View, CardView, useThemeColor } from '@/components/Themed';
 import CitationCard, { Citation } from '@/components/CitationCard';
 import { supabase } from '@/utils/supabase';
+import { AuthStore } from '@/components/AuthStore';
 
 // Mock Databases for testing RAG flows locally without Supabase keys
 const MOCK_ANSWERS: Record<string, { answer: string; citations: Citation[] }> = {
@@ -82,20 +84,82 @@ const MOCK_ANSWERS: Record<string, { answer: string; citations: Citation[] }> = 
 };
 
 export default function SearchResultsScreen() {
-  const { query, jurisdiction } = useLocalSearchParams<{ query: string; jurisdiction: string }>();
+  const { query, jurisdiction, savedId: routeSavedId } = useLocalSearchParams<{ query: string; jurisdiction: string; savedId?: string }>();
   const [loading, setLoading] = useState(true);
   const [answer, setAnswer] = useState('');
   const [citations, setCitations] = useState<Citation[]>([]);
   const [saved, setSaved] = useState(false);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [session, setSession] = useState(AuthStore.getSession());
 
   const primaryColor = useThemeColor({}, 'primary');
   const accentColor = useThemeColor({}, 'accent');
   const textMutedColor = useThemeColor({}, 'textMuted');
 
+  // Subscribe to AuthStore updates
+  useEffect(() => {
+    const unsubscribe = AuthStore.subscribe((newSession) => {
+      setSession(newSession);
+    });
+    return unsubscribe;
+  }, []);
+
   useEffect(() => {
     async function performSearch() {
       setLoading(true);
+
+      // Scenario 1: Loading an already bookmarked right by savedId directly from the DB
+      if (routeSavedId && supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('saved_rights')
+            .select(`
+              id,
+              title,
+              query_text,
+              ai_answer,
+              saved_rights_citations (
+                legal_document_id,
+                legal_documents (
+                  id,
+                  jurisdiction,
+                  code_name,
+                  article_number,
+                  content
+                )
+              )
+            `)
+            .eq('id', routeSavedId)
+            .single();
+
+          if (error) throw error;
+          if (data) {
+            setAnswer(data.ai_answer);
+            setSaved(true);
+            setSavedId(data.id);
+
+            const fetchedCitations = (data.saved_rights_citations || [])
+              .map((src: any) => src.legal_documents)
+              .filter(Boolean)
+              .map((doc: any) => ({
+                id: doc.id,
+                jurisdiction: doc.jurisdiction,
+                code_name: doc.code_name,
+                article_number: doc.article_number,
+                content: doc.content,
+                similarity: 1.0
+              }));
+
+            setCitations(fetchedCitations);
+            setLoading(false);
+            return;
+          }
+        } catch (err) {
+          console.error('❌ Failed to fetch saved right details from database:', err);
+        }
+      }
       
+      // Scenario 2: Standard search flow
       // Fallback search logic if Supabase client is not available or unset
       if (!supabase) {
         // Wait 1.5 seconds to simulate API lag
@@ -128,6 +192,11 @@ export default function SearchResultsScreen() {
 
         setAnswer(data.answer);
         setCitations(data.citations || []);
+
+        const activeSession = AuthStore.getSession();
+        if (activeSession?.user?.id) {
+          await checkSavedStatus(activeSession.user.id);
+        }
       } catch (err) {
         console.error('❌ Edge Function search failed. Falling back to local mock data:', err);
         // Fallback to local mock data on failure
@@ -145,6 +214,98 @@ export default function SearchResultsScreen() {
 
     performSearch();
   }, [query, jurisdiction]);
+
+  const checkSavedStatus = async (currentUserId: string) => {
+    if (!supabase || !query) return;
+    try {
+      const { data, error } = await supabase
+        .from('saved_rights')
+        .select('id')
+        .eq('user_id', currentUserId)
+        .eq('query_text', query.trim())
+        .maybeSingle();
+
+      if (data) {
+        setSaved(true);
+        setSavedId(data.id);
+      }
+    } catch (err) {
+      console.error('Error checking saved status:', err);
+    }
+  };
+
+  const handleToggleSave = async () => {
+    if (!session || !session.user) {
+      Alert.alert(
+        'Iniciar Sesión',
+        'Necesitas una cuenta para guardar tus derechos y consultarlos sin conexión.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Iniciar Sesión', onPress: () => router.push('/auth') }
+        ]
+      );
+      return;
+    }
+
+    if (!supabase) {
+      // Local fallback toggle in mock mode
+      setSaved(!saved);
+      return;
+    }
+
+    try {
+      if (saved && savedId) {
+        // Unsave / Delete
+        const { error } = await supabase
+          .from('saved_rights')
+          .delete()
+          .eq('id', savedId);
+
+        if (error) throw error;
+        setSaved(false);
+        setSavedId(null);
+      } else {
+        // Save / Insert
+        const { data: newSave, error: saveError } = await supabase
+          .from('saved_rights')
+          .insert({
+            user_id: session.user.id,
+            title: query || 'Consulta sin título',
+            query_text: query || '',
+            ai_answer: answer
+          })
+          .select()
+          .single();
+
+        if (saveError) throw saveError;
+
+        // Insert related citations
+        if (citations && citations.length > 0) {
+          const citationInserts = citations
+            .filter(c => c.id && (typeof c.id === 'number' || !isNaN(Number(c.id))))
+            .map(c => ({
+              saved_right_id: newSave.id,
+              legal_document_id: Number(c.id)
+            }));
+
+          if (citationInserts.length > 0) {
+            const { error: citError } = await supabase
+              .from('saved_rights_citations')
+              .insert(citationInserts);
+            if (citError) {
+              console.error('Error saving citations:', citError);
+            }
+          }
+        }
+
+        setSaved(true);
+        setSavedId(newSave.id);
+      }
+    } catch (err: any) {
+      console.error('❌ Failed to toggle save status:', err);
+      Alert.alert('Error', 'No pudimos actualizar tus derechos guardados.');
+    }
+  };
 
   const handleShare = async () => {
     try {
@@ -205,7 +366,7 @@ export default function SearchResultsScreen() {
 
               <TouchableOpacity 
                 style={styles.actionButton} 
-                onPress={() => setSaved(!saved)}
+                onPress={handleToggleSave}
               >
                 <SymbolView 
                   name={saved ? "bookmark.fill" : "bookmark"} 
