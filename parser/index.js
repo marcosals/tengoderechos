@@ -36,12 +36,13 @@ async function getEmbedding(text) {
 
   try {
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=${GEMINI_API_KEY}`,
       {
-        model: 'models/text-embedding-004',
+        model: 'models/gemini-embedding-2',
         content: {
           parts: [{ text: text }]
-        }
+        },
+        outputDimensionality: 768
       },
       {
         headers: {
