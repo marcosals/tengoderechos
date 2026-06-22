@@ -113,8 +113,8 @@ Contexto legal (Artículos oficiales de la base de datos):
 ${contextText}
 `;
 
-    // 5. Generate plain language explanation using Gemini 2.5 Flash
-    const chatResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+    // 5. Generate plain language explanation using Gemini 2.5 Flash and log/increment query count in parallel
+    const chatPromise = fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -133,6 +133,17 @@ ${contextText}
         }
       }),
     });
+
+    const dbLogPromise = supabaseClient.rpc("increment_popular_query", {
+      p_query_text: query.trim()
+    });
+
+    // Resolve both operations in parallel to guarantee logging while maintaining speed
+    const [chatResponse, dbLogResult] = await Promise.all([chatPromise, dbLogPromise]);
+
+    if (dbLogResult.error) {
+      console.error("❌ Failed to log/increment query count:", dbLogResult.error.message);
+    }
 
     if (!chatResponse.ok) {
       const errText = await chatResponse.text();
