@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
+import * as Location from 'expo-location';
 
 import { Text, View, TextInput, CardView, useThemeColor } from '@/components/Themed';
 import { LocationStore } from '@/components/LocationStore';
@@ -26,6 +27,21 @@ const FALLBACK_POPULAR_QUERIES: PopularQuery[] = [
   { id: '4', query_text: '¿Qué hacer si un policía me detiene sin una orden?', category: 'Constitucional' }
 ];
 
+const mapRegionToState = (region: string | null): string => {
+  if (!region) return 'CDMX';
+  const r = region.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // strip accents
+  
+  if (r.includes('jalisco')) return 'Jalisco';
+  if (r.includes('nuevo leon')) return 'Nuevo León';
+  if (r.includes('puebla')) return 'Puebla';
+  if (r.includes('yucatan')) return 'Yucatán';
+  if (r.includes('baja california')) return 'Baja California';
+  if (r.includes('mexico') && (r.includes('estado') || r.includes('edo'))) return 'Estado de México';
+  if (r.includes('ciudad de mexico') || r.includes('distrito federal') || r.includes('cdmx') || r.includes('df')) return 'CDMX';
+  
+  return 'CDMX';
+};
+
 export default function SearchHomeScreen() {
   const [query, setQuery] = useState('');
   const [jurisdiction, setJurisdiction] = useState(LocationStore.getState());
@@ -35,6 +51,44 @@ export default function SearchHomeScreen() {
   const primaryColor = useThemeColor({}, 'primary');
   const accentColor = useThemeColor({}, 'accent');
   const textMutedColor = useThemeColor({}, 'textMuted');
+
+  // Automatic location resolution on mount
+  useEffect(() => {
+    async function requestAndResolveLocation() {
+      try {
+        const { status: existingStatus } = await Location.getForegroundPermissionsAsync();
+        let finalStatus = existingStatus;
+
+        if (existingStatus === 'undetermined') {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          finalStatus = status;
+        }
+
+        if (finalStatus !== 'granted') {
+          console.log('Location permission denied or not granted.');
+          return;
+        }
+
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Low
+        });
+
+        const geocode = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude
+        });
+
+        if (geocode && geocode.length > 0) {
+          const region = geocode[0].region;
+          const resolvedState = mapRegionToState(region);
+          LocationStore.setState(resolvedState);
+        }
+      } catch (err) {
+        console.warn('⚠️ Location resolution failed:', err);
+      }
+    }
+    requestAndResolveLocation();
+  }, []);
 
   // Subscribe to changes in active jurisdiction from LocationStore
   useEffect(() => {
